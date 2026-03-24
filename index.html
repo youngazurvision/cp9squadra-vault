@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CP9 DIGITAL VAULT</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap');
 
@@ -381,8 +382,6 @@
   <!-- ═══════════════════════════════ SCRIPT ═══════════════════════════════ -->
   <script>
     // ─── CONFIG ──────────────────────────────────────────────────────────────────
-    const FORMSPREE_URL = "https://formspree.io/f/maqprjdq"; // <-- Colle ton URL Formspree ici
-
     const CARDS = [
       {
         id: "vault",
@@ -506,14 +505,76 @@
       return ok;
     }
 
+    // ─── SUPABASE ─────────────────────────────────────────────────────────────────
+    const SUPABASE_URL  = "";  // ← colle ton URL Supabase  ex: https://xxxx.supabase.co
+    const SUPABASE_KEY  = "";  // ← colle ta clé anon publique
+
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // Upsert utilisateur + fusion collection dans Supabase
+    async function saveToSupabase(prenom, email, instagram, newCards) {
+      // Récupère la collection existante pour la fusionner
+      const { data: existing } = await db
+        .from("users")
+        .select("collection")
+        .eq("email", email)
+        .maybeSingle();
+
+      const merged = [...new Set([...(existing?.collection || []), ...newCards])];
+
+      const { error } = await db.from("users").upsert(
+        { prenom, email, instagram, collection: merged },
+        { onConflict: "email" }
+      );
+      if (error) throw new Error(error.message);
+    }
+
+    // Vérifie si l'email existe déjà → reconnexion auto
+    async function checkExistingUser(email) {
+      const { data } = await db
+        .from("users")
+        .select("prenom, email, instagram, collection")
+        .eq("email", email)
+        .maybeSingle();
+      return data || null;
+    }
+
+    // Blur sur l'email → reconnexion automatique si connu
+    document.getElementById("field-email").addEventListener("blur", async (e) => {
+      const email = e.target.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+
+      const existing = await checkExistingUser(email);
+      if (!existing) return;
+
+      isRegistered = true;
+      userData = { prenom: existing.prenom, email: existing.email, instagram: existing.instagram };
+      localStorage.setItem("cp9_registered", "true");
+      localStorage.setItem("cp9_user", JSON.stringify(userData));
+
+      if (Array.isArray(existing.collection)) {
+        existing.collection.forEach(id => addCard(id));
+      }
+
+      if (scannedCard && !hasCard(scannedCard.id)) {
+        addCard(scannedCard.id);
+        saveToSupabase(existing.prenom, existing.email, existing.instagram, [scannedCard.id]).catch(() => {});
+      }
+
+      hideModal();
+      cleanURL();
+      renderAll();
+      showToast(`👋 Content de te revoir, ${existing.prenom} !`);
+    });
+
     captureForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!validate()) return;
 
-      const prenom = document.getElementById("field-prenom").value.trim();
-      const email = document.getElementById("field-email").value.trim();
+      const prenom    = document.getElementById("field-prenom").value.trim();
+      const email     = document.getElementById("field-email").value.trim();
       const instagram = document.getElementById("field-instagram").value.trim();
-      const errBox = document.getElementById("form-error");
+      const errBox    = document.getElementById("form-error");
       errBox.classList.add("hidden");
 
       submitBtn.disabled = true;
@@ -522,27 +583,8 @@
       const newCards = scannedCard ? [scannedCard.id] : [];
 
       try {
-        // ── Sauvegarde principale → Neon via Edge Function ──────────────────
-        const res = await fetch("/api", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prenom, email, instagram, collection: newCards }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "Erreur serveur");
-        }
+        await saveToSupabase(prenom, email, instagram, newCards);
 
-        // ── Formspree en parallèle pour la notif email (non bloquant) ───────
-        if (FORMSPREE_URL) {
-          fetch(FORMSPREE_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Accept": "application/json" },
-            body: JSON.stringify({ prenom, email, instagram, carte_scannee: scannedCardID || "accès direct" }),
-          }).catch(() => {});
-        }
-
-        // ── Sauvegarde locale ────────────────────────────────────────────────
         isRegistered = true;
         userData = { prenom, email, instagram };
         localStorage.setItem("cp9_registered", "true");
@@ -556,57 +598,11 @@
         showToast(`🔓 ${scannedCard ? scannedCard.name : "VAULT"} DÉBLOQUÉ !`);
 
       } catch (err) {
-        errBox.textContent = `Erreur : ${err.message}. Vérifie ta connexion.`;
+        errBox.textContent = `Erreur : ${err.message}`;
         errBox.classList.remove("hidden");
         submitBtn.disabled = false;
         submitBtn.textContent = "⚡ REJOINDRE LA SQUADRA";
       }
-    });
-
-    // ── Reconnexion automatique si l'email est déjà connu dans Neon ─────────
-    async function checkExistingUser(email) {
-      try {
-        const res = await fetch(`/api?email=${encodeURIComponent(email)}`);
-        if (!res.ok) return null;
-        const data = await res.json();
-        return data.found ? data.user : null;
-      } catch {
-        return null;
-      }
-    }
-
-    document.getElementById("field-email").addEventListener("blur", async (e) => {
-      const email = e.target.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
-
-      const existing = await checkExistingUser(email);
-      if (!existing) return;
-
-      // Reconnecter sans redemander le formulaire
-      isRegistered = true;
-      userData = { prenom: existing.prenom, email: existing.email, instagram: existing.instagram };
-      localStorage.setItem("cp9_registered", "true");
-      localStorage.setItem("cp9_user", JSON.stringify(userData));
-
-      // Restaurer la collection depuis Neon
-      if (Array.isArray(existing.collection)) {
-        existing.collection.forEach(id => addCard(id));
-      }
-
-      // Ajouter la nouvelle carte scannée si nécessaire
-      if (scannedCard && !hasCard(scannedCard.id)) {
-        addCard(scannedCard.id);
-        fetch("/api", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...userData, collection: [scannedCard.id] }),
-        }).catch(() => {});
-      }
-
-      hideModal();
-      cleanURL();
-      renderAll();
-      showToast(`👋 Content de te revoir, ${existing.prenom} !`);
     });
 
     // ─── CARD RENDERING ──────────────────────────────────────────────────────────
@@ -742,6 +738,10 @@
             addCard(scannedCard.id);
             renderAll();
             showToast(`🔓 ${scannedCard.name} DÉBLOQUÉ !`);
+            // Mettre à jour Supabase en arrière-plan
+            if (userData) {
+              saveToSupabase(userData.prenom, userData.email, userData.instagram, [scannedCard.id]).catch(() => {});
+            }
           } else {
             showToast(`✅ ${scannedCard.name} déjà dans ta collection !`);
           }
