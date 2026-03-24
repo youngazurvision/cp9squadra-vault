@@ -513,20 +513,35 @@
 
     // Upsert utilisateur + fusion collection dans Supabase
     async function saveToSupabase(prenom, email, instagram, newCards) {
-      // Récupère la collection existante pour la fusionner
+      // 1. Récupère la collection existante pour la fusionner
       const { data: existing } = await db
         .from("users")
         .select("collection")
         .eq("email", email)
         .maybeSingle();
 
-      const merged = [...new Set([...(existing?.collection || []), ...newCards])];
+      // 2. Fusion — garantit un Array[] propre (jamais une string)
+      const existingCards = Array.isArray(existing?.collection) ? existing.collection : [];
+      const incomingCards = Array.isArray(newCards) ? newCards : [];
+      const merged = [...new Set([...existingCards, ...incomingCards])];
 
-      const { error } = await db.from("users").upsert(
-        { prenom, email, instagram, collection: merged },
-        { onConflict: "email" }
-      );
-      if (error) throw new Error(error.message);
+      console.log("[CP9] upsert payload →", { prenom, email, instagram, collection: merged });
+
+      // 3. Upsert avec onConflict sur email
+      const { data, error } = await db
+        .from("users")
+        .upsert(
+          { prenom, email, instagram, collection: merged },
+          { onConflict: "email" }
+        )
+        .select();
+
+      if (error) {
+        console.error("[CP9] Supabase error →", error.message, "|", error.details, "|", error.hint);
+        throw new Error(error.message);
+      }
+
+      console.log("[CP9] upsert success →", data);
     }
 
     // Vérifie si l'email existe déjà → reconnexion auto
