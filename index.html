@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CP9 DIGITAL VAULT</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <!-- Supabase calls handled server-side via Netlify Function -->
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap');
 
@@ -505,59 +505,29 @@
       return ok;
     }
 
-    // ─── SUPABASE ─────────────────────────────────────────────────────────────────
-    const SUPABASE_URL = "https://rbexkjgvhnnklcbgywlo.supabase.co";
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJiZXhramd2aG5ua2xjYmd5d2xvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0NDA0OTYsImV4cCI6MjA4NzAxNjQ5Nn0.ZwxFrLcty0oUz-SpapSFXM17CpFrH0Qwc64rpmszdRM";
+    // ─── API (Netlify Function) ────────────────────────────────────────────────
+    const API_URL = "/.netlify/functions/api";
 
-    let db;
-    try {
-      db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      console.log("[CP9] Supabase client OK");
-    } catch (e) {
-      console.error("[CP9] Supabase init FAILED →", e.message);
-    }
-
-    // Upsert utilisateur + fusion collection dans Supabase
     async function saveToSupabase(prenom, email, instagram, newCards) {
-      // 1. Récupère la collection existante pour la fusionner
-      const { data: existing } = await db
-        .from("users")
-        .select("collection")
-        .eq("email", email)
-        .maybeSingle();
-
-      // 2. Fusion — garantit un Array[] propre (jamais une string)
-      const existingCards = Array.isArray(existing?.collection) ? existing.collection : [];
-      const incomingCards = Array.isArray(newCards) ? newCards : [];
-      const merged = [...new Set([...existingCards, ...incomingCards])];
-
-      console.log("[CP9] upsert payload →", { prenom, email, instagram, collection: merged });
-
-      // 3. Upsert avec onConflict sur email
-      const { data, error } = await db
-        .from("users")
-        .upsert(
-          { prenom, email, instagram, collection: merged },
-          { onConflict: "email" }
-        )
-        .select();
-
-      if (error) {
-        console.error("[CP9] Supabase error →", error.message, "|", error.details, "|", error.hint);
-        throw new Error(error.message);
-      }
-
-      console.log("[CP9] upsert success →", data);
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "register", prenom, email, instagram, newCards }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Erreur serveur");
+      console.log("[CP9] register success →", json.data);
     }
 
-    // Vérifie si l'email existe déjà → reconnexion auto
     async function checkExistingUser(email) {
-      const { data } = await db
-        .from("users")
-        .select("prenom, email, instagram, collection")
-        .eq("email", email)
-        .maybeSingle();
-      return data || null;
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check", email }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Erreur serveur");
+      return json.user || null;
     }
 
     // Blur sur l'email → reconnexion automatique si connu
