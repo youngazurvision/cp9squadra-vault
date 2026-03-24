@@ -551,6 +551,7 @@
       if (scannedCard) addCard(scannedCard.id);
 
       hideModal();
+      cleanURL();
       renderAll();
       showToast(`🔓 ${scannedCard ? scannedCard.name : "VAULT"} DÉBLOQUÉ !`);
     });
@@ -665,16 +666,25 @@
       setTimeout(() => t.classList.remove("show"), 3500);
     }
 
+    // ─── URL CLEANUP ─────────────────────────────────────────────────────────────
+    function cleanURL() {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     // ─── INIT ────────────────────────────────────────────────────────────────────
     function init() {
+      // Garde de sécurité : s'assurer que la modale est cachée si déjà inscrit
+      if (isRegistered) hideModal();
+
       renderAll();
 
       if (scannedCard) {
-        // Card scanned via NFC
         if (!isRegistered) {
+          // Nouvel utilisateur → afficher le formulaire
           showModal();
         } else {
-          // Already registered: unlock directly
+          // Déjà inscrit → débloquer directement, sans modale
+          hideModal();
           if (!hasCard(scannedCard.id)) {
             addCard(scannedCard.id);
             renderAll();
@@ -682,9 +692,10 @@
           } else {
             showToast(`✅ ${scannedCard.name} déjà dans ta collection !`);
           }
+          // Nettoyer l'URL pour éviter le re-déclenchement à l'actualisation
+          cleanURL();
         }
       }
-      // No card scanned: just show the collection (no modal)
     }
 
     init();
