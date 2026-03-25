@@ -619,6 +619,7 @@
         showToast(`🔓 ${scannedCard ? scannedCard.name : "VAULT"} DÉBLOQUÉ !`);
 
       } catch (err) {
+        console.error("[CP9] Erreur submit →", err);
         errBox.textContent = `Erreur : ${err.message}`;
         errBox.classList.remove("hidden");
         submitBtn.disabled = false;
